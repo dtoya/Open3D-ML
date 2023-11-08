@@ -3,7 +3,7 @@ import copy
 
 import torch
 
-from openvino.inference_engine import IECore
+import openvino.runtime as ov 
 
 from .. import dataloaders
 
@@ -21,7 +21,7 @@ class OpenVINOModel:
     """
 
     def __init__(self, base_model):
-        self.ie = IECore()
+        self.ie = ov.Core()
         self.exec_net = None
         self.base_model = base_model
         self.device = "CPU"
@@ -84,8 +84,10 @@ class OpenVINOModel:
 
         self.base_model.forward = origin_forward
 
-        net = self.ie.read_network(buf.getvalue(), b'', init_from_buffer=True)
-        self.exec_net = self.ie.load_network(net, str(self.device).upper())
+        print("Before read_model: ")
+        #net = self.ie.read_model(buf.getvalue(), b'', init_from_buffer=True)
+        net = self.ie.read_model(buf.getvalue(), b'')
+        self.exec_net = self.ie.compile_model(net, str(self.device).upper())
 
     def forward(self, inputs):
         if self.exec_net is None:
@@ -105,7 +107,7 @@ class OpenVINOModel:
                 if tensor.nelement() > 0:
                     tensors[name] = tensor.detach().numpy()
 
-        output = self.exec_net.infer(tensors)
+        output = self.exec_net(tensors)
 
         if len(output) == 1:
             output = next(iter(output.values()))
