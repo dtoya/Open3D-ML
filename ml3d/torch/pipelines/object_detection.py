@@ -43,6 +43,44 @@ class ObjectDetection(BasePipeline):
                          split=split,
                          **kwargs)
 
+    def get_result(self):
+        boxes = None
+        results = self.model.get_results()
+        if not results.empty():
+            result = results.get()
+            data = result['input']
+            output = result['output']
+            boxes = self.model.inference_end(output, data)
+        return boxes 
+
+    def submit_inference(self, data):
+        """Run inference on given data.
+
+        Args:
+            data: A raw data.
+
+        Returns:
+            Returns the inference results.
+        """
+        model = self.model
+
+        model.eval()
+
+        # If run_inference is called on raw data.
+        if isinstance(data, dict):
+            batcher = ConcatBatcher(self.device, model.cfg.name)
+            data = batcher.collate_fn([{
+                'data': data,
+                'attr': {
+                    'split': 'test'
+                }
+            }])
+
+        data.to(self.device)
+
+        with torch.no_grad():
+            model(data)
+
     def run_inference(self, data):
         """Run inference on given data.
 
