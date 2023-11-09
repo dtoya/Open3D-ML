@@ -53,6 +53,9 @@ class ObjectDetection(BasePipeline):
             boxes = self.model.inference_end(output, data)
         return boxes 
 
+    def wait_all(self):
+        self.model.wait_all()
+
     def submit_inference(self, data):
         """Run inference on given data.
 
@@ -108,9 +111,6 @@ class ObjectDetection(BasePipeline):
 
         with torch.no_grad():
             results = model(data)
-            print(type(results.to_dict()))
-            results = results.to_dict().values()
-            print(type(results))
             boxes = model.inference_end(results, data)
 
         return boxes

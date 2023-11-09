@@ -15,8 +15,6 @@ def pointpillars_extract_feats(self, x):
     return x
 
 
-
-
 class OpenVINOModel:
     """Class providing OpenVINO backend for PyTorch models.
 
@@ -24,13 +22,13 @@ class OpenVINOModel:
     """
 
     def __init__(self, base_model):
-        self.ie = ov.Core()
-        self.exec_net = None
+        self.core = ov.Core()
+        self.compiled_model = None
         self.base_model = base_model
         self.device = "CPU"
         self.ireqs = None
         self.async_mode = False 
-        self.results = queue.Queue()
+        self.results = None 
 
         # A workaround for unsupported torch.square by ONNX
         torch.square = lambda x: torch.pow(x, 2)
@@ -69,12 +67,11 @@ class OpenVINOModel:
             raise TypeError(f"Unknown inputs type: {inputs.__class__}")
         return inputs
 
-    def set_async_mode(self):
-        self.async_mode = True
+    def set_async_mode(self, value=True):
+        self.async_mode = value 
 
     def _callback_function(self, request, userdata):
-        #output = request.get_output_tensor()
-        output = request.get_output_tensor().data
+        output = request.results
         if len(output) == 1:
             output = next(iter(output.values()))
             output = torch.tensor(output)
@@ -83,8 +80,11 @@ class OpenVINOModel:
         result = {'input': userdata, 'output': output}
         self.results.put(result)
     
-    def get_result(self):
+    def get_results(self):
         return self.results 
+    
+    def wait_all(self):
+        self.ireqs.wait_all()
 
     def _read_torch_model(self, inputs):
         inputs = copy.deepcopy(inputs)
@@ -107,18 +107,26 @@ class OpenVINOModel:
 
         self.base_model.forward = origin_forward
 
-        #net = self.ie.read_model(buf.getvalue(), b'', init_from_buffer=True)
-        net = self.ie.read_model(buf.getvalue(), b'')
-        tput = {'PERFORMANCE_HINT': 'THROUGHPUT'}
-        self.exec_net = self.ie.compile_model(net, str(self.device).upper(), tput)
+        net = self.core.read_model(buf.getvalue())
+        config = {
+            'PERFORMANCE_HINT': 'THROUGHPUT',
+            'NUM_STREAMS': 'AUTO'
+            }
+        self.compiled_model = self.core.compile_model(net, str(self.device).upper(), config)
         if self.async_mode:
-            self.ireqs = ov.AsyncInferQueue(self.exec_net)
+            nireq = self.compiled_model.get_property("OPTIMAL_NUMBER_OF_INFER_REQUESTS")
+            num_streams = self.compiled_model.get_property("NUM_STREAMS")
+            print("nireq = {}".format(nireq))
+            print("num_streams = {}".format(num_streams))
+            self.ireqs = ov.AsyncInferQueue(self.compiled_model)
             self.ireqs.set_callback(self._callback_function)
+            self.results = queue.Queue()
 
     def forward(self, inputs):
-        if self.exec_net is None:
+        if self.compiled_model is None:
             self._read_torch_model(inputs)
 
+        inputs_orig = inputs
         inputs = self._get_inputs(inputs)
 
         tensors = {}
@@ -134,11 +142,16 @@ class OpenVINOModel:
                     tensors[name] = tensor.detach().numpy()
 
         output = None
-        if self.async_mode:
+        if self.ireqs:
             idle_id = self.ireqs.get_idle_request_id()
-            self.ireqs.start_async(tensors, tensors)
+            self.ireqs.start_async(tensors, inputs_orig)
         else:
-            output = self.exec_net(tensors)
+            output = self.compiled_model(tensors)
+            if len(output) == 1:
+                output = next(iter(output.values()))
+                output = torch.tensor(output)
+            else:
+                output = tuple([torch.tensor(out) for out in output.values()])
 
         return output
 

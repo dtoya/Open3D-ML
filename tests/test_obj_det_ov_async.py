@@ -1,7 +1,11 @@
 import os
-import open3d.ml as _ml3d
-import open3d.ml.torch as ml3d
+#import open3d.ml as _ml3d
+import ml3d as _ml3d
+#import open3d.ml.torch as ml3d
+import ml3d.torch as ml3d
 from tqdm import tqdm
+
+import time
 
 cfg_file = "ml3d/configs/pointpillars_kitti.yml"
 cfg = _ml3d.utils.Config.load_from_file(cfg_file)
@@ -12,7 +16,7 @@ model.to('cpu')
 model.set_async_mode()
 
 cfg.dataset['dataset_path'] = "../dataset/KITTI"
-dataset = ml3d.datasets.KITTI(cfg.dataset.pop('dataset_path', None), **cfg.dataset)
+dataset = _ml3d.datasets.KITTI(cfg.dataset.pop('dataset_path', None), **cfg.dataset)
 pipeline = ml3d.pipelines.ObjectDetection(model, dataset=dataset, device="gpu", **cfg.pipeline)
 
 # download the weights.
@@ -33,7 +37,10 @@ data = test_split.get_data(0)
 # run inference on a single example.
 # returns dict with 'predict_labels' and 'predict_scores'.
 
-for idx in tqdm(range(100)):
+num_images = 100
+start = time.perf_counter()
+
+for idx in tqdm(range(num_images)):
     data = test_split.get_data(idx)
     pipeline.submit_inference(data)
     while True:
@@ -41,6 +48,13 @@ for idx in tqdm(range(100)):
         if result == None:
             break
 
-# evaluate performance on the test set; this will write logs to './logs'.
-pipeline.run_test()
+pipeline.wait_all()
+
+end = time.perf_counter()
+time_ir = end - start
+print(
+    f"IR model in Inference Engine/CPU: {time_ir/num_images:.4f} \n"
+    f"seconds per image, FPS (includes pre-process): {num_images/time_ir:.2f}"
+)
+
 

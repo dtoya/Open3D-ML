@@ -5,6 +5,8 @@ import ml3d as _ml3d
 import ml3d.torch as ml3d
 from tqdm import tqdm
 
+import time
+
 cfg_file = "ml3d/configs/pointpillars_kitti.yml"
 cfg = _ml3d.utils.Config.load_from_file(cfg_file)
 
@@ -34,10 +36,17 @@ data = test_split.get_data(0)
 # run inference on a single example.
 # returns dict with 'predict_labels' and 'predict_scores'.
 
+num_images = 100
+start = time.perf_counter()
+
 for idx in tqdm(range(100)):
     data = test_split.get_data(idx)
     result = pipeline.run_inference(data)
 
-# evaluate performance on the test set; this will write logs to './logs'.
-pipeline.run_test()
+end = time.perf_counter()
+time_ir = end - start
+print(
+    f"IR model in Inference Engine/CPU: {time_ir/num_images:.4f} \n"
+    f"seconds per image, FPS (includes pre-process): {num_images/time_ir:.2f}"
+)
 
